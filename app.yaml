@@ -1,6 +1,2 @@
-runtime: python39  # Укажите версию Python, которую вы используете
-entrypoint: gunicorn -b :$PORT main:app  # Укажите команду для запуска вашего приложения
-
-# Дополнительные настройки
-env_variables:
-  EXAMPLE_ENV_VAR: 'value'  # Пример переменной окружения
+runtime: python312  # Укажите версию Python, которую вы используете
+entrypoint: python main.py  # Измените на запуск вашего скрипта напрямую
