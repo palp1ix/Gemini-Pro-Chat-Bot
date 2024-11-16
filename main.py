@@ -6,6 +6,10 @@ import google.generativeai as genai
 import asyncio
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.bot import DefaultBotProperties
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp.web import Application, run_app
+import os
+import aiohttp
 
 # Настройка логирования
 logging.basicConfig(
@@ -36,17 +40,30 @@ model = genai.GenerativeModel(
     model_name="gemini-1.5-pro-002",
     generation_config=generation_config,
 )
-chat_session = model.start_chat()  # Initialize an empty chat session
+chat_sessions = {}  # Dictionary to store chat sessions for each user
 
 # Функция старта бота
 @router.message(Command("start"))
 async def start(message: Message):
-    await message.answer('Привет! Я бот, подключенный к Google Gemini. Как я могу помочь?')
+    await message.answer('Привет! Я бот, подклюенный к Google Gemini. Как я могу помочь?')
+
+# Функция начала нового чата
+@router.message(Command("new"))
+async def new_chat(message: Message):
+    user_id = message.from_user.id
+    chat_sessions[user_id] = model.start_chat()
+    await message.answer("Новый чат начат.")
 
 # Функция обработки сообщений пользователя
 @router.message()
 async def handle_message(message: Message):
+    user_id = message.from_user.id
     user_message = message.text
+
+    if user_id not in chat_sessions:
+        chat_sessions[user_id] = model.start_chat()
+
+    chat_session = chat_sessions[user_id]  # Retrieve the user's chat session
     gemini_response = chat_session.send_message(user_message)
 
     try:
@@ -55,11 +72,37 @@ async def handle_message(message: Message):
         logger.error(f"Error sending message: {e}")
         await message.answer("Произошла ошибка при отправке сообщения.")
 
+# Создание aiohttp приложения и Dispatcher
+app = Application()
+dp = Dispatcher()
+
+# Настройка обработчика запросов
+SimpleRequestHandler(
+    dispatcher=dp,
+    bot=bot,
+).register(app, path="/")
+
+# Настройка aiogram webhook
+setup_application(app, dp, bot=bot)
+
 # Основная функция запуска бота
 async def main():
-    dp = Dispatcher()  # Убедитесь, что Dispatcher инициализирован правильно
+    dp = Dispatcher()
     dp.include_router(router)
-    await dp.start_polling(bot)
+
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp.web.TCPSite(runner, port=int(os.environ.get("PORT", 8080)))
+    
+    await site.start()
+
+    try:
+        await dp.start_polling(bot) # Start polling within the existing event loop
+    finally:
+        await runner.cleanup()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.error("Bot stopped!")

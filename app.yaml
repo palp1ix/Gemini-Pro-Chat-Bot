@@ -1,6 +1,6 @@
-runtime: python39  # Укажите версию Python, которую вы используете
-entrypoint: gunicorn -b :$PORT main:app  # Укажите команду для запуска вашего приложения
+runtime: python312  # Укажите версию Python, которую вы используете
+entrypoint: gunicorn --worker-class aiohttp.GunicornWebWorker --timeout 120 main:app  # Изменена точка входа
 
 # Дополнительные настройки
 env_variables:
-  EXAMPLE_ENV_VAR: 'value'  # Пример переменной окружения
+  EXAMPLE_ENV_VAR: 'value'
