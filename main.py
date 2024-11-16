@@ -36,10 +36,6 @@ generation_config = {
     "max_output_tokens": 8192, # Adjust max_output_tokens as needed
     "response_mime_type": "text/plain",
 }
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro-002",
-    generation_config=generation_config,
-)
 chat_sessions = {}  # Dictionary to store chat sessions for each user
 
 # Функция старта бота
@@ -51,26 +47,73 @@ async def start(message: Message):
 @router.message(Command("new"))
 async def new_chat(message: Message):
     user_id = message.from_user.id
-    chat_sessions[user_id] = model.start_chat()
+    chat_sessions[user_id] = genai.GenerativeModel( # Create a new model for each user
+        model_name="gemini-1.5-pro-002",
+        generation_config=generation_config,
+    ).start_chat() # Immediately start a chat session
     await message.answer("Новый чат начат.")
 
 # Функция обработки сообщений пользователя
 @router.message()
-async def handle_message(message: Message):
+async def handle_message(message: types.Message):
     user_id = message.from_user.id
-    user_message = message.text
 
     if user_id not in chat_sessions:
-        chat_sessions[user_id] = model.start_chat()
+        chat_sessions[user_id] = genai.GenerativeModel(
+            model_name="gemini-1.5-pro-002",
+            generation_config=generation_config,
+        ).start_chat()
 
-    chat_session = chat_sessions[user_id]  # Retrieve the user's chat session
-    gemini_response = chat_session.send_message(user_message)
+    chat_session = chat_sessions[user_id]
 
-    try:
-        await message.answer(gemini_response.text)
-    except Exception as e:
-        logger.error(f"Error sending message: {e}")
-        await message.answer("Произошла ошибка при отправке сообщения.")
+    if message.content_type in ['photo', 'document']:
+        if message.content_type == 'photo':
+            file_id = message.photo[-1].file_id
+        else:
+            file_id = message.document.file_id
+
+        try:
+            # Download the file to disk
+            file = await bot.get_file(file_id)
+            file_path = file.file_path
+            file_bytes = await bot.download_file(file_path)
+
+            # Save the file temporarily
+            temp_file_path = os.path.join("temp", file_path.split("/")[-1])
+            os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
+            with open(temp_file_path, 'wb') as f:
+                f.write(file_bytes.getvalue())
+
+            # Upload the file using genai.upload_file
+            uploaded_file = genai.upload_file(temp_file_path)
+
+            # Prepare the prompt
+            if message.caption:
+                prompt = [message.caption, uploaded_file]
+            else:
+                prompt = [uploaded_file]
+
+            # Generate response
+            response = chat_session.send_message(prompt)
+            await message.answer(response.text)
+
+            # Remove the temporary file
+            os.remove(temp_file_path)
+
+        except Exception as e:
+            logger.error(f"Error processing file: {e}")
+            await message.answer("Произошла ошибка при обработке файла.")
+
+    elif message.text:
+        user_message = message.text
+        try:
+            gemini_response = chat_session.send_message(user_message)
+            await message.answer(gemini_response.text)
+        except Exception as e:
+            logger.error(f"Error sending message to Gemini: {e}")
+            await message.answer("Произошла ошибка при отправке сообщения.")
+    else:
+        await message.answer("Этот тип сообщения не поддерживается.")
 
 # Создание aiohttp приложения и Dispatcher
 app = Application()
